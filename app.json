@@ -2,7 +2,7 @@
   "expo": {
     "name": "Plixo",
     "slug": "plixo-mobile",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon-plixo.png",
     "scheme": "plixo",
@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.plixo.app",
-      "buildNumber": "15",
+      "buildNumber": "18",
       "splash": {
         "image": "./assets/images/download.png",
         "resizeMode": "cover",
