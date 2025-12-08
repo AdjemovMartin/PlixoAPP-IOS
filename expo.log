@@ -1,0 +1,11 @@
+Starting project at /home/project
+Starting Metro Bundler
+Waiting on exp+plixo-mobile://mpl2gtb8uy3v2dk.boltexpo.dev
+Logs for your project will appear below.
+Web Bundled 2061ms node_modules/expo-router/entry.js (2794 modules)
+Web node_modules/expo-router/entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.1% (2781/2794)
+Web node_modules/expo-router/entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web node_modules/expo-router/entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 2551ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 3047ms node_modules/expo-router/entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "402920964283",
+    "project_id": "plixo-57b35",
+    "storage_bucket": "plixo-57b35.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:402920964283:android:6d795f1d239b2b35c3699e",
+        "android_client_info": {
+          "package_name": "com.plixo.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCnY1AuCXtA0MQqjSKIbiLZXDM_ddf3UcU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
