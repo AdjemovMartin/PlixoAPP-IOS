@@ -33,7 +33,7 @@
         "NSPhotoLibraryUsageDescription": "Plixo.bg needs photo library access so users can choose and upload existing images for their listings.",
         "CFBundleURLTypes": [
           {
-            "CFBundleURLSchemes": ["com.googleusercontent.apps.YOUR_IOS_CLIENT_ID_HERE"]
+            "CFBundleURLSchemes": ["plixo"]
           }
         ]
       }

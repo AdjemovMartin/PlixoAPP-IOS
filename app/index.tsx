@@ -7,6 +7,8 @@ import {
 } from '@/services/notificationService';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
 import { ExternalLink } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -24,7 +26,7 @@ import {
   View
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { configureGoogleSignIn, signInWithGoogle, exchangeGoogleToken, signOutGoogle } from '@/services/googleAuthService';
+import { configureGoogleSignIn, signInWithGoogle, exchangeGoogleToken, signOutGoogle, setAuthRequest } from '@/services/googleAuthService';
 import { setSupabaseSession, clearSupabaseSession, getSupabaseSession, onAuthStateChange } from '@/services/supabaseAuthService';
 import type { Session, User } from '@supabase/supabase-js';
 
@@ -83,6 +85,20 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
 
   // Heartbeat tracking
   const lastHbAt = useRef<number>(Date.now());
+
+  // Google Authentication Setup
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    redirectUri: makeRedirectUri({ scheme: 'plixo' }),
+  });
+
+  console.log('[Index] Google Auth Request initialized:', {
+    hasRequest: !!request,
+    hasPromptAsync: !!promptAsync,
+    redirectUri: makeRedirectUri({ scheme: 'plixo' }),
+  });
 
   const sendMessageToWebView = useCallback(
     (message: string) => {
@@ -152,63 +168,106 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
   }, [currentUrl, sendMessageToWebView]);
 
   const handleGoogleSignIn = useCallback(async () => {
-    if (authLoading) return;
+    console.log('[Index] handleGoogleSignIn called, authLoading:', authLoading);
+
+    if (authLoading) {
+      console.log('[Index] Already loading, skipping');
+      return;
+    }
+
+    if (!request) {
+      console.error('[Index] Google auth request not ready');
+      Alert.alert('Error', 'Google authentication not ready. Please try again.');
+      return;
+    }
 
     setAuthLoading(true);
+    console.log('[Index] Starting Google Sign-In flow...');
 
     try {
+      console.log('[Index] Calling signInWithGoogle()...');
       const googleResult = await signInWithGoogle();
+
+      console.log('[Index] signInWithGoogle result:', {
+        success: googleResult.success,
+        hasIdToken: !!googleResult.idToken,
+        cancelled: googleResult.cancelled,
+        error: googleResult.error,
+      });
 
       if (!googleResult.success) {
         if (googleResult.cancelled) {
+          console.log('[Index] User cancelled sign-in');
           setAuthLoading(false);
           return;
         }
 
+        console.error('[Index] Sign-in failed:', googleResult.error);
         Alert.alert('Sign In Failed', googleResult.error || 'Failed to sign in with Google');
         setAuthLoading(false);
         return;
       }
 
       if (!googleResult.idToken) {
+        console.error('[Index] No ID token received');
         Alert.alert('Sign In Failed', 'No ID token received from Google');
         setAuthLoading(false);
         return;
       }
 
+      console.log('[Index] Exchanging Google token with Edge Function...');
       const exchangeResult = await exchangeGoogleToken(googleResult.idToken);
 
+      console.log('[Index] Exchange result:', {
+        success: exchangeResult.success,
+        hasData: !!exchangeResult.data,
+        error: exchangeResult.error,
+      });
+
       if (!exchangeResult.success || !exchangeResult.data) {
+        console.error('[Index] Token exchange failed:', exchangeResult.error);
         Alert.alert('Authentication Failed', exchangeResult.error || 'Failed to authenticate with server');
         setAuthLoading(false);
         return;
       }
 
+      console.log('[Index] Setting Supabase session...');
       const sessionResult = await setSupabaseSession(
         exchangeResult.data.access_token,
         exchangeResult.data.refresh_token
       );
 
+      console.log('[Index] Session result:', {
+        success: sessionResult.success,
+        hasSession: !!sessionResult.session,
+        error: sessionResult.error,
+      });
+
       if (!sessionResult.success || !sessionResult.session) {
+        console.error('[Index] Session creation failed:', sessionResult.error);
         Alert.alert('Session Failed', sessionResult.error || 'Failed to create session');
         setAuthLoading(false);
         return;
       }
 
+      console.log('[Index] Authentication successful!');
       setSession(sessionResult.session);
       setUser(sessionResult.session.user);
       setIsAuthenticated(true);
       setShowGoogleButton(false);
 
+      console.log('[Index] Injecting session to WebView...');
       injectSessionToWebView(sessionResult.session);
 
       setAuthLoading(false);
+      console.log('[Index] Google Sign-In complete');
     } catch (error: any) {
-      console.error('Unexpected error during Google Sign-In:', error);
+      console.error('[Index] Unexpected error during Google Sign-In:', error);
+      console.error('[Index] Error stack:', error.stack);
       Alert.alert('Error', 'An unexpected error occurred. Please try again.');
       setAuthLoading(false);
     }
-  }, [authLoading, injectSessionToWebView]);
+  }, [authLoading, injectSessionToWebView, request]);
 
   const handleSignOut = useCallback(async () => {
     try {
@@ -239,6 +298,14 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
   useEffect(() => {
     configureGoogleSignIn();
   }, []);
+
+  // Pass auth request to google service when ready
+  useEffect(() => {
+    if (request && promptAsync) {
+      console.log('[Index] Setting auth request in googleAuthService');
+      setAuthRequest(request, promptAsync);
+    }
+  }, [request, promptAsync]);
 
   // Check for existing Supabase session on mount
   useEffect(() => {

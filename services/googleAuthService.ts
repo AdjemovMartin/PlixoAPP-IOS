@@ -1,6 +1,8 @@
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
+
+WebBrowser.maybeCompleteAuthSession();
 
 export interface GoogleAuthResult {
   success: boolean;
@@ -18,67 +20,90 @@ export interface EdgeFunctionResponse {
 const EDGE_FUNCTION_URL = 'https://lxhpheflaucphoxnljws.supabase.co/functions/v1/google-auth-mobile';
 const EDGE_FUNCTION_TIMEOUT = 10000;
 
+let googleAuthRequest: Google.GoogleAuthRequestConfig | null = null;
+let promptAsyncFn: (() => Promise<any>) | null = null;
+
 export function configureGoogleSignIn(): void {
-  try {
-    const iosClientId = Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
-    const androidClientId = Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
-    const webClientId = Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
+  console.log('[Google Auth] Configuration called - expo-auth-session will be used');
+  const redirectUri = makeRedirectUri({ scheme: 'plixo' });
+  console.log('[Google Auth] Redirect URI:', redirectUri);
+}
 
-    GoogleSignin.configure({
-      iosClientId: Platform.OS === 'ios' ? iosClientId : undefined,
-      webClientId: Platform.OS === 'android' ? webClientId : undefined,
-      offlineAccess: true,
-      forceCodeForRefreshToken: true,
-    });
-
-    console.log('Google Sign-In configured successfully');
-  } catch (error) {
-    console.error('Error configuring Google Sign-In:', error);
-  }
+export function setAuthRequest(request: Google.GoogleAuthRequestConfig, promptFn: () => Promise<any>): void {
+  console.log('[Google Auth] Setting auth request and prompt function');
+  googleAuthRequest = request;
+  promptAsyncFn = promptFn;
 }
 
 export async function signInWithGoogle(): Promise<GoogleAuthResult> {
-  try {
-    await GoogleSignin.hasPlayServices();
+  console.log('[Google Auth] signInWithGoogle called');
 
-    const userInfo = await GoogleSignin.signIn();
-
-    const idToken = (userInfo as any).data?.idToken || (userInfo as any).idToken;
-
-    if (!idToken) {
-      return {
-        success: false,
-        error: 'No ID token received from Google',
-      };
-    }
-
+  if (!promptAsyncFn) {
+    console.error('[Google Auth] ERROR: promptAsync function not available');
     return {
-      success: true,
-      idToken: idToken,
+      success: false,
+      error: 'Authentication not initialized. Please restart the app.',
     };
-  } catch (error: any) {
-    console.error('Google Sign-In error:', error);
+  }
 
-    if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+  try {
+    console.log('[Google Auth] Calling promptAsync to open Google account picker...');
+    const result = await promptAsyncFn();
+
+    console.log('[Google Auth] promptAsync result:', JSON.stringify({
+      type: result.type,
+      hasParams: !!result.params,
+      hasAuthentication: !!result.authentication,
+    }));
+
+    if (result.type === 'cancel') {
+      console.log('[Google Auth] User cancelled the sign-in');
       return {
         success: false,
         cancelled: true,
       };
     }
 
-    if (error.code === statusCodes.IN_PROGRESS) {
+    if (result.type === 'error') {
+      console.error('[Google Auth] Authentication error:', result.error);
       return {
         success: false,
-        error: 'Sign-in already in progress',
+        error: result.error?.message || 'Authentication failed',
       };
     }
 
-    if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+    if (result.type !== 'success') {
+      console.error('[Google Auth] Unexpected result type:', result.type);
       return {
         success: false,
-        error: 'Google Play Services not available',
+        error: `Unexpected result: ${result.type}`,
       };
     }
+
+    const idToken = result.authentication?.idToken || result.params?.id_token;
+
+    console.log('[Google Auth] ID Token received:', idToken ? 'YES' : 'NO');
+
+    if (!idToken) {
+      console.error('[Google Auth] No ID token in result');
+      return {
+        success: false,
+        error: 'No ID token received from Google',
+      };
+    }
+
+    console.log('[Google Auth] Successfully got ID token');
+    return {
+      success: true,
+      idToken: idToken,
+    };
+  } catch (error: any) {
+    console.error('[Google Auth] Exception during sign-in:', error);
+    console.error('[Google Auth] Error details:', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+    });
 
     return {
       success: false,
@@ -88,10 +113,13 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult> {
 }
 
 export async function exchangeGoogleToken(idToken: string): Promise<{ success: boolean; data?: EdgeFunctionResponse; error?: string }> {
+  console.log('[Google Auth] Exchanging Google token with Edge Function');
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), EDGE_FUNCTION_TIMEOUT);
 
+    console.log('[Google Auth] Making request to:', EDGE_FUNCTION_URL);
     const response = await fetch(EDGE_FUNCTION_URL, {
       method: 'POST',
       headers: {
@@ -103,8 +131,11 @@ export async function exchangeGoogleToken(idToken: string): Promise<{ success: b
 
     clearTimeout(timeoutId);
 
+    console.log('[Google Auth] Edge Function response status:', response.status);
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error('[Google Auth] Edge Function error:', errorData);
       return {
         success: false,
         error: errorData.error || `Server error: ${response.status}`,
@@ -112,8 +143,13 @@ export async function exchangeGoogleToken(idToken: string): Promise<{ success: b
     }
 
     const data: EdgeFunctionResponse = await response.json();
+    console.log('[Google Auth] Edge Function success, has tokens:', {
+      hasAccessToken: !!data.access_token,
+      hasRefreshToken: !!data.refresh_token,
+    });
 
     if (!data.access_token || !data.refresh_token) {
+      console.error('[Google Auth] Invalid response from server - missing tokens');
       return {
         success: false,
         error: 'Invalid response from server',
@@ -125,7 +161,7 @@ export async function exchangeGoogleToken(idToken: string): Promise<{ success: b
       data,
     };
   } catch (error: any) {
-    console.error('Error exchanging Google token:', error);
+    console.error('[Google Auth] Error exchanging Google token:', error);
 
     if (error.name === 'AbortError') {
       return {
@@ -142,9 +178,12 @@ export async function exchangeGoogleToken(idToken: string): Promise<{ success: b
 }
 
 export async function signOutGoogle(): Promise<void> {
+  console.log('[Google Auth] Sign out called');
   try {
-    await GoogleSignin.signOut();
+    promptAsyncFn = null;
+    googleAuthRequest = null;
+    console.log('[Google Auth] Sign out successful');
   } catch (error) {
-    console.error('Error signing out from Google:', error);
+    console.error('[Google Auth] Error signing out:', error);
   }
 }
