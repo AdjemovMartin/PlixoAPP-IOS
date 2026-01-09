@@ -5,6 +5,7 @@ This guide will help you set up push notifications and Google Sign-In for your P
 ## Prerequisites
 
 - Expo account (sign up at https://expo.dev)
+- **Supabase account and project** (REQUIRED - get URL and anon key from dashboard)
 - Firebase project with Cloud Messaging enabled
 - Google Cloud Console project for OAuth credentials
 - Physical device for testing (recommended for both push notifications and Google Sign-In)
@@ -111,13 +112,24 @@ Add **both debug and release SHA-1 fingerprints** to your Android OAuth client i
 ### Step 2: Configure Environment Variables
 
 1. Copy `.env.example` to `.env` (if not already done)
-2. Add your Google Client IDs to `.env`:
+2. Add your **Supabase credentials** (REQUIRED):
+   - Get these from your Supabase project dashboard
+   - The app will not work without these
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+```
+
+3. Add your **Google Client IDs** (for Google Sign-In):
 
 ```env
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=YOUR_IOS_CLIENT_ID.apps.googleusercontent.com
 EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
 ```
+
+**Note:** Without Supabase credentials, the app will fail to initialize. Make sure to set these before building or running the app.
 
 ### Step 3: Update iOS URL Scheme
 
