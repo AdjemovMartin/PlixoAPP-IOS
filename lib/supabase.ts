@@ -7,25 +7,23 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('ERROR: Missing Supabase credentials. Please check EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env');
+  throw new Error(
+    'Missing Supabase credentials. Check EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.'
+  );
 }
 
 const webStorage = {
-  getItem: async (key: string): Promise<string | null> => {
-    if (typeof window !== 'undefined') {
-      return window.localStorage.getItem(key);
-    }
-    return null;
+  async getItem(key: string): Promise<string | null> {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage.getItem(key);
   },
-  setItem: async (key: string, value: string): Promise<void> => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(key, value);
-    }
+  async setItem(key: string, value: string): Promise<void> {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(key, value);
   },
-  removeItem: async (key: string): Promise<void> => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(key);
-    }
+  async removeItem(key: string): Promise<void> {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(key);
   },
 };
 
@@ -34,8 +32,8 @@ const storage = Platform.OS === 'web' ? webStorage : AsyncStorage;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage,
-    autoRefreshToken: true,
     persistSession: true,
+    autoRefreshToken: true,
     detectSessionInUrl: false,
   },
 });
