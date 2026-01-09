@@ -11,6 +11,7 @@ import { ExternalLink } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   AppState,
   AppStateStatus,
@@ -23,6 +24,9 @@ import {
   View
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { configureGoogleSignIn, signInWithGoogle, exchangeGoogleToken, signOutGoogle } from '@/services/googleAuthService';
+import { setSupabaseSession, clearSupabaseSession, getSupabaseSession, onAuthStateChange } from '@/services/supabaseAuthService';
+import type { Session, User } from '@supabase/supabase-js';
 
 interface HomeScreenProps {
   initialUrl?: string;
@@ -41,6 +45,13 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
   const [isAtTop, setIsAtTop] = useState(true);
   const [isOnWalletPage, setIsOnWalletPage] = useState(false);
   const [hasError, setHasError] = useState(false);
+
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [showGoogleButton, setShowGoogleButton] = useState(false);
 
   // pull-to-refresh UI
   const pullAnim = useRef(new Animated.Value(0)).current;
@@ -109,6 +120,150 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
     [sendMessageToWebView]
   );
 
+  const injectSessionToWebView = useCallback((sessionData: Session) => {
+    try {
+      const url = new URL(currentUrl);
+
+      if (url.hostname !== 'plixo.bg' && url.hostname !== 'www.plixo.bg') {
+        console.log('Skipping session injection for non-plixo.bg domain:', url.hostname);
+        return;
+      }
+
+      const message = JSON.stringify({
+        type: 'SUPABASE_SESSION',
+        payload: {
+          access_token: sessionData.access_token,
+          refresh_token: sessionData.refresh_token,
+          user: sessionData.user,
+        },
+      });
+
+      sendMessageToWebView(message);
+      console.log('Session injected into WebView');
+    } catch (error) {
+      console.error('Error injecting session to WebView:', error);
+    }
+  }, [currentUrl, sendMessageToWebView]);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    if (authLoading) return;
+
+    setAuthLoading(true);
+
+    try {
+      const googleResult = await signInWithGoogle();
+
+      if (!googleResult.success) {
+        if (googleResult.cancelled) {
+          setAuthLoading(false);
+          return;
+        }
+
+        Alert.alert('Sign In Failed', googleResult.error || 'Failed to sign in with Google');
+        setAuthLoading(false);
+        return;
+      }
+
+      if (!googleResult.idToken) {
+        Alert.alert('Sign In Failed', 'No ID token received from Google');
+        setAuthLoading(false);
+        return;
+      }
+
+      const exchangeResult = await exchangeGoogleToken(googleResult.idToken);
+
+      if (!exchangeResult.success || !exchangeResult.data) {
+        Alert.alert('Authentication Failed', exchangeResult.error || 'Failed to authenticate with server');
+        setAuthLoading(false);
+        return;
+      }
+
+      const sessionResult = await setSupabaseSession(
+        exchangeResult.data.access_token,
+        exchangeResult.data.refresh_token
+      );
+
+      if (!sessionResult.success || !sessionResult.session) {
+        Alert.alert('Session Failed', sessionResult.error || 'Failed to create session');
+        setAuthLoading(false);
+        return;
+      }
+
+      setSession(sessionResult.session);
+      setUser(sessionResult.session.user);
+      setIsAuthenticated(true);
+      setShowGoogleButton(false);
+
+      injectSessionToWebView(sessionResult.session);
+
+      setAuthLoading(false);
+    } catch (error: any) {
+      console.error('Unexpected error during Google Sign-In:', error);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+      setAuthLoading(false);
+    }
+  }, [authLoading, injectSessionToWebView]);
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      await signOutGoogle();
+      await clearSupabaseSession();
+      setSession(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      setShowGoogleButton(false);
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  }, []);
+
+  // Initialize Google Sign-In on mount
+  useEffect(() => {
+    configureGoogleSignIn();
+  }, []);
+
+  // Check for existing Supabase session on mount
+  useEffect(() => {
+    (async () => {
+      const existingSession = await getSupabaseSession();
+      if (existingSession) {
+        setSession(existingSession);
+        setUser(existingSession.user);
+        setIsAuthenticated(true);
+        injectSessionToWebView(existingSession);
+      }
+    })();
+  }, [injectSessionToWebView]);
+
+  // Listen for auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChange((newSession, newUser) => {
+      setSession(newSession);
+      setUser(newUser);
+      setIsAuthenticated(!!newSession);
+
+      if (newSession) {
+        injectSessionToWebView(newSession);
+      }
+    });
+
+    return unsubscribe;
+  }, [injectSessionToWebView]);
+
+  // Monitor URL to show/hide Google button on login/signup pages
+  useEffect(() => {
+    try {
+      const url = new URL(currentUrl);
+      const isAuthPage = url.pathname.includes('/login') ||
+                         url.pathname.includes('/signup') ||
+                         url.pathname.includes('/auth');
+
+      setShowGoogleButton(isAuthPage && !isAuthenticated);
+    } catch {
+      setShowGoogleButton(false);
+    }
+  }, [currentUrl, isAuthenticated]);
+
   // SAFE notifications effect
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -157,6 +312,10 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
         }
 
         if (data.type === 'badge' && data.action === 'clear') clearBadge();
+
+        if (data.type === 'google_auth_requested') {
+          handleGoogleSignIn();
+        }
 
         if (data.type === 'navigation') {
           setCurrentUrl(data.url);
@@ -317,14 +476,50 @@ if (data.type === 'overscroll' && Platform.OS === 'ios') {
 
       } catch {}
     },
-    [sendDeviceIdToWebView, isAtTop, refreshing, pullAnim, onRefresh]
-  ); // <-- Perfect closure
+    [sendDeviceIdToWebView, isAtTop, refreshing, pullAnim, onRefresh, handleGoogleSignIn]
+  );
 
 
   // Inject scroll + navigation + HEARTBEAT + OVERSCROLL detection
-// Inject scroll + navigation + HEARTBEAT + OVERSCROLL detection
 const injectedJavaScript = `
   (function() {
+    // Listen for Supabase session from native app
+    if (!window.__plixoSessionListener) {
+      window.__plixoSessionListener = true;
+
+      document.addEventListener('message', function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.type === 'SUPABASE_SESSION' && data.payload) {
+            console.log('Received Supabase session from native app');
+            localStorage.setItem('supabase.auth.token', JSON.stringify(data.payload));
+
+            if (window.location.pathname.includes('/login') || window.location.pathname.includes('/signup')) {
+              window.location.href = '/';
+            }
+          }
+        } catch (err) {
+          console.error('Error handling native message:', err);
+        }
+      });
+
+      window.addEventListener('message', function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.type === 'SUPABASE_SESSION' && data.payload) {
+            console.log('Received Supabase session from native app');
+            localStorage.setItem('supabase.auth.token', JSON.stringify(data.payload));
+
+            if (window.location.pathname.includes('/login') || window.location.pathname.includes('/signup')) {
+              window.location.href = '/';
+            }
+          }
+        } catch (err) {
+          console.error('Error handling native message:', err);
+        }
+      });
+    }
+
     // Navigation tracking
     window.addEventListener('popstate', function() {
       window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -534,6 +729,28 @@ useEffect(() => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {showGoogleButton && (
+        <View style={styles.googleButtonContainer}>
+          <TouchableOpacity
+            onPress={handleGoogleSignIn}
+            activeOpacity={0.8}
+            disabled={authLoading}
+            style={styles.googleButtonWrapper}
+          >
+            <View style={styles.googleButton}>
+              <View style={styles.googleIconContainer}>
+                <Text style={styles.googleIcon}>G</Text>
+              </View>
+              {authLoading ? (
+                <ActivityIndicator color="#1F1F1F" style={styles.googleButtonLoader} />
+              ) : (
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {isOnWalletPage && (
         <View style={styles.walletButtonContainer}>
           <TouchableOpacity onPress={handleOpenWalletInBrowser} activeOpacity={0.8}>
@@ -665,6 +882,56 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  googleButtonContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  googleButtonWrapper: {
+    width: '100%',
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dadce0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  googleIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  googleIcon: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    color: '#1F1F1F',
+    fontSize: 16,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+  },
+  googleButtonLoader: {
+    marginLeft: 12,
   },
   walletButtonContainer: {
     paddingHorizontal: 16,

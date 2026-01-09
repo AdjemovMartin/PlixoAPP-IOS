@@ -30,7 +30,12 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Plixo.bg needs camera access so users can take photos of items when creating listings.",
-        "NSPhotoLibraryUsageDescription": "Plixo.bg needs photo library access so users can choose and upload existing images for their listings."
+        "NSPhotoLibraryUsageDescription": "Plixo.bg needs photo library access so users can choose and upload existing images for their listings.",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": ["com.googleusercontent.apps.YOUR_IOS_CLIENT_ID_HERE"]
+          }
+        ]
       }
     },
     "android": {
