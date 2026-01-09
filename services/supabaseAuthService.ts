@@ -7,7 +7,16 @@ export interface AuthState {
   isLoading: boolean;
 }
 
+const SUPABASE_NOT_CONFIGURED_ERROR = 'Supabase is not configured. Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY in environment variables.';
+
 export async function setSupabaseSession(accessToken: string, refreshToken: string): Promise<{ success: boolean; error?: string; session?: Session }> {
+  if (!supabase) {
+    return {
+      success: false,
+      error: SUPABASE_NOT_CONFIGURED_ERROR,
+    };
+  }
+
   try {
     const { data, error } = await supabase.auth.setSession({
       access_token: accessToken,
@@ -43,6 +52,11 @@ export async function setSupabaseSession(accessToken: string, refreshToken: stri
 }
 
 export async function getSupabaseSession(): Promise<Session | null> {
+  if (!supabase) {
+    console.error(SUPABASE_NOT_CONFIGURED_ERROR);
+    return null;
+  }
+
   try {
     const { data, error } = await supabase.auth.getSession();
 
@@ -59,6 +73,11 @@ export async function getSupabaseSession(): Promise<Session | null> {
 }
 
 export async function clearSupabaseSession(): Promise<void> {
+  if (!supabase) {
+    console.error(SUPABASE_NOT_CONFIGURED_ERROR);
+    return;
+  }
+
   try {
     await supabase.auth.signOut();
   } catch (error) {
@@ -67,6 +86,11 @@ export async function clearSupabaseSession(): Promise<void> {
 }
 
 export function onAuthStateChange(callback: (session: Session | null, user: User | null) => void): () => void {
+  if (!supabase) {
+    console.error(SUPABASE_NOT_CONFIGURED_ERROR);
+    return () => {}; // Return no-op unsubscribe function
+  }
+
   const { data } = supabase.auth.onAuthStateChange((_event, session) => {
     callback(session, session?.user || null);
   });
@@ -77,6 +101,11 @@ export function onAuthStateChange(callback: (session: Session | null, user: User
 }
 
 export async function getCurrentUser(): Promise<User | null> {
+  if (!supabase) {
+    console.error(SUPABASE_NOT_CONFIGURED_ERROR);
+    return null;
+  }
+
   try {
     const { data, error } = await supabase.auth.getUser();
 

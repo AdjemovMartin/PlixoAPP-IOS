@@ -46,6 +46,12 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
   const [isOnWalletPage, setIsOnWalletPage] = useState(false);
   const [hasError, setHasError] = useState(false);
 
+  // Check Supabase configuration
+  const isSupabaseConfigured = !!(
+    process.env.EXPO_PUBLIC_SUPABASE_URL &&
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
+  );
+
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
@@ -217,6 +223,18 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
     }
   }, []);
 
+  // Log Supabase configuration status in development
+  useEffect(() => {
+    if (__DEV__ && !isSupabaseConfigured) {
+      console.warn(
+        'Supabase is not configured. Authentication features will be disabled.\n' +
+        'To enable authentication, add the following to your .env file:\n' +
+        '- EXPO_PUBLIC_SUPABASE_URL\n' +
+        '- EXPO_PUBLIC_SUPABASE_ANON_KEY'
+      );
+    }
+  }, [isSupabaseConfigured]);
+
   // Initialize Google Sign-In on mount
   useEffect(() => {
     configureGoogleSignIn();
@@ -224,6 +242,8 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
 
   // Check for existing Supabase session on mount
   useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
     (async () => {
       const existingSession = await getSupabaseSession();
       if (existingSession) {
@@ -233,10 +253,12 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
         injectSessionToWebView(existingSession);
       }
     })();
-  }, [injectSessionToWebView]);
+  }, [injectSessionToWebView, isSupabaseConfigured]);
 
   // Listen for auth state changes
   useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
     const unsubscribe = onAuthStateChange((newSession, newUser) => {
       setSession(newSession);
       setUser(newUser);
@@ -248,10 +270,15 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
     });
 
     return unsubscribe;
-  }, [injectSessionToWebView]);
+  }, [injectSessionToWebView, isSupabaseConfigured]);
 
   // Monitor URL to show/hide Google button on login/signup pages
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setShowGoogleButton(false);
+      return;
+    }
+
     try {
       const url = new URL(currentUrl);
       const isAuthPage = url.pathname.includes('/login') ||
@@ -262,7 +289,7 @@ export default function HomeScreen({ initialUrl, navigationPath }: HomeScreenPro
     } catch {
       setShowGoogleButton(false);
     }
-  }, [currentUrl, isAuthenticated]);
+  }, [currentUrl, isAuthenticated, isSupabaseConfigured]);
 
   // SAFE notifications effect
   useEffect(() => {
